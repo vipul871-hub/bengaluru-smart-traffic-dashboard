@@ -103,9 +103,18 @@ def get_shape_lookup(shape_df):
 
 def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
     m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
-    folium.TileLayer("OpenStreetMap", name="Street map", control=True).add_to(m)
-    folium.TileLayer("CartoDB positron", name="Light map", control=True).add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="Dark map", control=True).add_to(m)
+    folium.TileLayer(
+    tiles="OpenStreetMap",
+    name="Street map",
+    control=True
+).add_to(m)
+
+folium.TileLayer(
+    tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attr="© OpenStreetMap contributors © CARTO",
+    name="Light map",
+    control=True
+).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
     if traffic_df is not None:
