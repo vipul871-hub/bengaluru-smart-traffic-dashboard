@@ -218,11 +218,20 @@ def route_map(route_paths, route_info, shape_lookup, center,
         "OpenStreetMap", name="Street map", control=True
     ).add_to(map_view)
     folium.TileLayer(
-        "CartoDB positron", name="Light map", control=True
-    ).add_to(map_view)
-    folium.TileLayer(
-        "CartoDB dark_matter", name="Dark map", control=True
-    ).add_to(map_view)
+        folium.TileLayer(
+    tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attr="© OpenStreetMap contributors",
+    name="Street map",
+    control=True,
+).add_to(map_view)
+
+folium.TileLayer(
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/"
+          "World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    attr="Tiles © Esri",
+    name="Detailed road map",
+    control=True,
+).add_to(map_view)
 
     if traffic_df is not None:
         traffic_layer = folium.FeatureGroup(
