@@ -254,45 +254,15 @@ def route_map(
         tiles=None,
     )
 
-    # Base map layers
+   
+    # Base map layers - Free OpenStreetMap
     folium.TileLayer(
-        tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        tiles="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         attr="© OpenStreetMap contributors",
         name="Street map",
+        overlay=False,
         control=True,
-        max_zoom=19,
-    ).add_to(map_view)
-
-    folium.TileLayer(
-        tiles=(
-            "https://server.arcgisonline.com/ArcGIS/rest/services/"
-            "World_Street_Map/MapServer/tile/{z}/{y}/{x}"
-        ),
-        attr="Tiles © Esri",
-        name="Detailed road map",
-        control=True,
-        max_zoom=19,
-    ).add_to(map_view)
-
-    folium.TileLayer(
-        tiles=(
-            "https://{s}.basemaps.cartocdn.com/light_all/"
-            "{z}/{x}/{y}{r}.png"
-        ),
-        attr="© OpenStreetMap contributors © CARTO",
-        name="Light map",
-        control=True,
-        max_zoom=19,
-    ).add_to(map_view)
-
-    folium.TileLayer(
-        tiles=(
-            "https://{s}.basemaps.cartocdn.com/dark_all/"
-            "{z}/{x}/{y}{r}.png"
-        ),
-        attr="© OpenStreetMap contributors © CARTO",
-        name="Dark map",
-        control=True,
+        show=True,
         max_zoom=19,
     ).add_to(map_view)
 
