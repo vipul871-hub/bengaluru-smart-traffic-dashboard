@@ -840,9 +840,10 @@ traffic_map = route_map(
 
 st_folium(
     traffic_map,
-    use_container_width=True,
+    width=1000,
     height=620,
     returned_objects=[],
+    key="bengaluru_traffic_map"
 )
 
 st.caption(
