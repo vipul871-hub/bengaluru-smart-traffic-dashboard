@@ -9,16 +9,54 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 
-st.set_page_config(page_title='Bengaluru Traffic Route Dashboard', page_icon='🚦', layout='wide')
+st.set_page_config(page_title='Dhule Smart Traffic Route Dashboard', page_icon='🚦', layout='wide')
 
-DEFAULT_FILE = 'Bengaluru_Traffic_Analysis_Converted.xlsx'
+# Public URL used by the dashboard sharing QR code.
+DASHBOARD_URL = "https://bengaluru-smart-traffic-dashboard-18yy.onrender.com"
+
+DEFAULT_FILE = 'Dhule_Traffic_Dataset_Synthetic.xlsx'
 
 @st.cache_data(show_spinner=False)
 def load_workbook(source):
+    # Bengaluru workbook used a title block above its headers (header=2),
+    # while the Dhule workbook has headers in the first row (header=0).
+    # Detect the correct header row separately for every worksheet.
     if isinstance(source, str):
-        return {s: pd.read_excel(source, sheet_name=s, header=2) for s in pd.ExcelFile(source).sheet_names}
-    raw = source.getvalue()
-    return {s: pd.read_excel(BytesIO(raw), sheet_name=s, header=2) for s in pd.ExcelFile(BytesIO(raw)).sheet_names}
+        excel_source = source
+        book = pd.ExcelFile(source)
+        read = lambda sheet, header: pd.read_excel(excel_source, sheet_name=sheet, header=header)
+    else:
+        raw = source.getvalue()
+        book = pd.ExcelFile(BytesIO(raw))
+        read = lambda sheet, header: pd.read_excel(BytesIO(raw), sheet_name=sheet, header=header)
+
+    required = {
+        'Segment Time Analysis': {'Street Name', 'Time Window', 'Start Latitude', 'Start Longitude',
+                                  'End Latitude', 'End Longitude', 'Travel Time Ratio'},
+        'Segments': {'Street Name', 'Start Latitude', 'Start Longitude', 'End Latitude', 'End Longitude'},
+        'Shape Points': {'New Segment ID', 'Latitude', 'Longitude', 'Point Sequence'},
+    }
+    output = {}
+    for sheet in book.sheet_names:
+        best_df, best_score = None, -1
+        for header_row in range(5):
+            try:
+                candidate = read(sheet, header_row)
+                cols = {str(c).strip() for c in candidate.columns}
+                expected = required.get(sheet, set())
+                score = len(cols & expected) if expected else sum(not str(c).startswith('Unnamed') for c in candidate.columns)
+                if score > best_score:
+                    best_df, best_score = candidate, score
+                if expected and expected.issubset(cols):
+                    best_df = candidate
+                    break
+            except Exception:
+                continue
+        if best_df is None:
+            best_df = read(sheet, 0)
+        best_df.columns = [str(c).strip() for c in best_df.columns]
+        output[sheet] = best_df.dropna(how='all').reset_index(drop=True)
+    return output
 
 
 def clean_num(df, cols):
@@ -103,9 +141,21 @@ def get_shape_lookup(shape_df):
 
 def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
     m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
-    folium.TileLayer("OpenStreetMap", name="Street map", control=True).add_to(m)
-    folium.TileLayer("CartoDB positron", name="Light map", control=True).add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="Dark map", control=True).add_to(m)
+    # Public basemaps that do not require a Carto API key.
+    folium.TileLayer(
+        tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attr="© OpenStreetMap contributors",
+        name="Street map",
+        control=True,
+        max_zoom=19,
+    ).add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles © Esri",
+        name="Detailed road map",
+        control=True,
+        max_zoom=19,
+    ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
     if traffic_df is not None:
@@ -157,15 +207,37 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
     folium.LayerControl(collapsed=False).add_to(m)
     return m
 
-st.title('🚦 Bengaluru Traffic & Optimal Route Dashboard')
-st.caption('Route planning is calculated from the road-segment network in the uploaded Excel workbook.')
+st.title('🚦 Dhule Smart Traffic & Optimal Route Dashboard')
+
+# Quick sharing: scanning this QR code opens the deployed dashboard.
+with st.sidebar.expander("📱 Share dashboard by QR code", expanded=False):
+    st.caption("Scan this QR code with a phone camera to open the dashboard.")
+    try:
+        import qrcode
+        qr_img = qrcode.make(DASHBOARD_URL)
+        qr_buffer = BytesIO()
+        qr_img.save(qr_buffer, format="PNG")
+        qr_bytes = qr_buffer.getvalue()
+        st.image(qr_bytes, caption="Dhule Smart Traffic Dashboard", width=220)
+        st.download_button(
+            "Download QR code",
+            data=qr_bytes,
+            file_name="bengaluru_smart_traffic_dashboard_qr.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+        st.link_button("Open dashboard", DASHBOARD_URL, use_container_width=True)
+    except Exception:
+        st.warning("QR code is unavailable. Check that the qrcode package is installed.")
+
+st.caption('Dhule route planning is calculated from the road-segment network in the uploaded Excel workbook.')
 
 with st.sidebar:
     st.header('1. Dataset')
     uploaded=st.file_uploader('Upload Excel file', type=['xlsx'])
     source=uploaded if uploaded is not None else (DEFAULT_FILE if os.path.exists(DEFAULT_FILE) else None)
     if source is None:
-        st.error('Upload Bengaluru_Traffic_Analysis_Converted.xlsx to continue.')
+        st.error('Upload Dhule_Traffic_Dataset_Synthetic.xlsx to continue.')
         st.stop()
     st.success('Dataset loaded')
 
@@ -240,7 +312,13 @@ except Exception:
     paths=[]
 
 if not paths:
-    st.error('No route could be found between the selected points in this time window. Try different streets/points.')
+    st.warning('The selected road points are not connected in this workbook network. The Dhule map and road-segment layer are shown below; route calculation needs a connected road network.')
+    shape_lookup = get_shape_lookup(shape)
+    center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
+    dhule_map = route_map([], [], shape_lookup, center, traffic_df=work)
+    st.subheader('Dhule road network and congestion map')
+    st_folium(dhule_map, use_container_width=True, height=620, returned_objects=[])
+    st.caption('The map is centred on the Dhule dataset coordinates. Road lines are the uploaded workbook segments; colors represent the recorded/synthetic travel-time ratio.')
     st.stop()
 
 infos=[]
