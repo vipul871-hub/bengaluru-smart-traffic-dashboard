@@ -6,12 +6,36 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import streamlit as st
+import streamlit.components.v1 as components
 import folium
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title='Bengaluru Traffic Route Dashboard', page_icon='🚦', layout='wide')
 
 DEFAULT_FILE = 'Bengaluru_Traffic_Analysis_Converted.xlsx'
+
+# Clean, responsive theme. This does not require a map API key.
+st.markdown("""
+<style>
+    .stApp { background: linear-gradient(180deg, #f5f8ff 0%, #f8fafc 260px, #f8fafc 100%); }
+    .block-container { max-width: 1580px; padding-top: 1.15rem; padding-bottom: 2rem; }
+    [data-testid="stHeader"] { background: rgba(248,250,252,0.88); }
+    [data-testid="stSidebar"] { background: #eef4ff; border-right: 1px solid #dbe5f4; }
+    [data-testid="stMetric"] { background: #ffffff; border: 1px solid #dce6f3; border-radius: 15px; padding: 14px 16px; box-shadow: 0 4px 14px rgba(25, 54, 94, 0.045); min-width: 0; overflow: visible; }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] div { color: #52657d; white-space: normal !important; overflow-wrap: anywhere; }
+    /* Keep the entire metric value and its unit visible instead of Streamlit's ellipsis. */
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] > div { font-size: clamp(1.35rem, 1.75vw, 1.9rem) !important; line-height: 1.22 !important; white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+    [data-testid="stMetricValue"] { min-width: 0; }
+    div[data-testid="stDataFrame"], div[data-testid="stTable"] { border-radius: 12px; overflow: hidden; }
+    .stButton > button, .stDownloadButton > button { border-radius: 12px; font-weight: 600; }
+    h1 { color: #122642; letter-spacing: -0.035em; }
+    h2, h3 { color: #193858; letter-spacing: -0.02em; }
+    @media (max-width: 768px) {
+        .block-container { padding: 0.75rem 0.65rem 1.25rem; }
+        [data-testid="stMetric"] { padding: 9px 10px; }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def load_workbook(source):
@@ -102,10 +126,44 @@ def get_shape_lookup(shape_df):
 
 
 def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
+    # Three independent base maps. Leaflet's LayerControl treats these as
+    # mutually exclusive base layers, while traffic and route layers remain
+    # transparent overlays. Explicit, key-free URLs avoid provider-alias issues.
     m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
-    folium.TileLayer("OpenStreetMap", name="Street map", control=True).add_to(m)
-    folium.TileLayer("CartoDB positron", name="Light map", control=True).add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="Dark map", control=True).add_to(m)
+
+    folium.TileLayer(
+        tiles="OpenStreetMap",
+        name="Street map",
+        overlay=False,
+        control=True,
+        show=True,
+        max_zoom=19,
+    ).add_to(m)
+
+    # Esri ArcGIS public raster tiles are used for the alternate basemaps.
+    # They do not require an API key. ArcGIS tile URLs use {z}/{y}/{x} order.
+    esri_attribution = "Tiles &copy; Esri — Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), OpenStreetMap contributors, and the GIS User Community"
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        name="Light map — detailed",
+        attr=esri_attribution,
+        overlay=False,
+        control=True,
+        show=False,
+        max_zoom=19,
+        max_native_zoom=19,
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        name="Dark map — navigation",
+        attr=esri_attribution,
+        overlay=False,
+        control=True,
+        show=False,
+        max_zoom=16,
+        max_native_zoom=16,
+    ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
     if traffic_df is not None:
@@ -122,7 +180,7 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
                 coords = pts if pts and len(pts) >= 2 else [a, b]
                 street = str(row.get('Street Name', 'Unknown road'))
                 speed = row.get('Average Speed (km/h)', np.nan)
-                tip = f"{street} | {label} | travel-time ratio {ratio:.2f} | speed {speed:.1f} km/h" if pd.notna(speed) else f"{street} | {label} | travel-time ratio {ratio:.2f}"
+                tip = f"{street} | {label} | travel-time ratio {ratio:.2f}× | speed {speed:.1f} km/h" if pd.notna(speed) else f"{street} | {label} | travel-time ratio {ratio:.2f}×"
                 folium.PolyLine(coords, color=color, weight=4, opacity=0.72, tooltip=tip).add_to(traffic_fg)
             except (TypeError, ValueError, KeyError):
                 continue
@@ -154,11 +212,12 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
     if route_paths:
         folium.Marker(route_paths[0][0], tooltip='Selected start', icon=folium.Icon(color='green', icon='play')).add_to(m)
         folium.Marker(route_paths[0][-1], tooltip='Destination', icon=folium.Icon(color='red', icon='flag')).add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+
     return m
 
-st.title('🚦 Bengaluru Traffic & Optimal Route Dashboard')
-st.caption('Route planning is calculated from the road-segment network in the uploaded Excel workbook.')
+st.title('🚦 Bengaluru City Map')
+st.caption('Smart traffic insights, route alternatives, and estimated travel time — powered by your road-segment workbook.')
 
 with st.sidebar:
     st.header('1. Dataset')
@@ -254,14 +313,145 @@ for p in paths:
 best_idx=int(np.argmin([x['score'] for x in infos]))
 best=infos[best_idx]
 
-# KPIs
+# Compact voice assistant panel. The voice still attempts to start after the map
+# has rendered; the small panel provides a visible fallback/replay control.
+welcome_html = r"""
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:Arial,sans-serif; background:transparent; color:#17324f; }
+  .voice-card { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 11px; border:1px solid #d8e4f2; border-radius:12px;
+    background:linear-gradient(135deg,#ffffff 0%,#f1f6ff 100%);
+    box-shadow:0 3px 12px rgba(28,55,90,.08); }
+  .voice-copy { min-width:0; }
+  .voice-title { font-size:13px; font-weight:700; line-height:1.25; }
+  .voice-sub { font-size:11px; color:#64748b; margin-top:2px; }
+  button { flex:0 0 auto; border:0; border-radius:9px; padding:8px 11px;
+    background:#173f70; color:#fff; font-size:12px; font-weight:600; cursor:pointer; }
+  button:focus { outline:2px solid #60a5fa; outline-offset:2px; }
+  @media(max-width:480px) { .voice-card { padding:8px; } .voice-sub { display:none; } button { padding:8px; } }
+</style></head>
+<body>
+<div class="voice-card">
+  <div class="voice-copy">
+    <div class="voice-title">🔊 Bengaluru AI Navigation</div>
+    <div class="voice-sub" id="voiceStatus">English cinematic voice · Welcome assistant</div>
+  </div>
+  <button id="voiceButton" type="button">Replay voice</button>
+</div>
+<script>
+(function () {
+  const greeting = "Good day. Welcome to Bengaluru City Map. Navigation systems are online. Please select your starting point and destination. I will help you compare routes, estimated travel times, and congestion levels. Have a smooth and safe journey.";
+  const status = document.getElementById('voiceStatus');
+  const button = document.getElementById('voiceButton');
+  let hasStarted = false;
+  let attemptCount = 0;
+  const maxAttempts = 3;
+
+  function chooseVoice(voices) {
+    return voices.find(v => /^en-GB$/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name)) ||
+      voices.find(v => /^en-GB$/i.test(v.lang)) ||
+      voices.find(v => /^en-IN$/i.test(v.lang)) ||
+      voices.find(v => /^en/i.test(v.lang)) || null;
+  }
+
+  function speakWelcome(isManual) {
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+      status.textContent = 'Speech is not supported by this browser';
+      return;
+    }
+    if (hasStarted && !isManual) return;
+    try {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const utterance = new SpeechSynthesisUtterance(greeting);
+      const voice = chooseVoice(synth.getVoices());
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice ? voice.lang : 'en-GB';
+      utterance.rate = 0.88;
+      utterance.pitch = 0.78;
+      utterance.volume = 1;
+      utterance.onstart = () => {
+        hasStarted = true;
+        status.textContent = 'Welcome message playing';
+      };
+      utterance.onend = () => { status.textContent = 'English AI voice · Ready'; };
+      utterance.onerror = (event) => {
+        status.textContent = 'Browser may require a tap on Replay voice';
+      };
+      synth.speak(utterance);
+      if (isManual) status.textContent = 'Starting welcome message…';
+    } catch (e) {
+      status.textContent = 'Tap Replay voice if automatic audio is blocked';
+    }
+  }
+
+  button.addEventListener('click', () => speakWelcome(true));
+
+  // The component is rendered immediately after st_folium. Try only after
+  // the map/dashboard has had time to paint, and retry briefly if voices load late.
+  function autoStart() {
+    if (hasStarted || attemptCount >= maxAttempts) return;
+    attemptCount += 1;
+    speakWelcome(false);
+  }
+  window.addEventListener('load', () => {
+    window.setTimeout(autoStart, 1800);
+    window.setTimeout(autoStart, 3500);
+  });
+  if (document.readyState === 'complete') {
+    window.setTimeout(autoStart, 1800);
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      if (!hasStarted) window.setTimeout(autoStart, 500);
+    };
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !hasStarted && attemptCount < maxAttempts) {
+      window.setTimeout(autoStart, 900);
+    }
+  });
+})();
+</script>
+</body></html>
+"""
+
+st.subheader('🗺️ Interactive Bengaluru map')
+shape_lookup = get_shape_lookup(shape)
+center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
+traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
+st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
+st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Select exactly one base map; traffic congestion and route lines remain independent overlays. Light and Dark maps use key-free Esri ArcGIS tiles. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
+# Small, unobtrusive voice assistant panel below the map; auto-welcome is attempted
+# after the map renders, and Replay voice is available if browser autoplay is blocked.
+components.html(welcome_html, height=66, scrolling=False)
+
+# KPIs — use two rows of three cards so values and units remain readable on desktop and mobile.
 st.subheader('Optimal route')
-cols=st.columns(6)
-labels=[('ETA',f"{best['time_min']:.1f} min"),('Distance',f"{best['distance_km']:.2f} km"),('Avg speed',f"{best['speed']:.1f} km/h"),('Traffic',best['traffic']),('Travel-time ratio',f"{best['ratio']:.2f}"),('Fuel estimate',f"{best['fuel_l']:.2f} L")]
-for c,(lab,val) in zip(cols,labels): c.metric(lab,val)
+kpi_rows = [
+    [
+        ('ETA', f"{best['time_min']:.1f} min"),
+        ('Distance', f"{best['distance_km']:.2f} km"),
+        ('Average speed', f"{best['speed']:.1f} km/h"),
+    ],
+    [
+        ('Traffic condition', str(best['traffic'])),
+        ('Travel-time ratio (×)', f"{best['ratio']:.2f}×"),
+        ('Estimated fuel', f"{best['fuel_l']:.2f} L"),
+    ],
+]
+for row_items in kpi_rows:
+    cols = st.columns(3, gap="medium")
+    for col, (label, value) in zip(cols, row_items):
+        with col:
+            st.metric(label, value)
 
 eta_minutes = int(round(best['time_min']))
 eta_clock = (pd.Timestamp.combine(pd.Timestamp.today().date(), departure_time) + pd.Timedelta(minutes=eta_minutes)).strftime('%I:%M %p')
+st.caption('Unit guide: ETA and route duration are shown in minutes (min); distance in kilometres (km); speed in kilometres per hour (km/h); fuel in litres (L). Travel-time ratio is a relative multiplier (×), not a time duration.')
 st.info(f"Recommended Route {best_idx+1}: {' → '.join(best['streets'][:8])}{' → …' if len(best['streets'])>8 else ''}\n\nEstimated arrival: {eta_clock} (using the selected time-window traffic estimate).")
 
 # Route table
@@ -270,27 +460,22 @@ for i,m in enumerate(infos,1):
     rows.append({'Route':f'Route {i}','Recommended':'✓' if i-1==best_idx else '',
                  'Distance (km)':round(m['distance_km'],2),'ETA (min)':round(m['time_min'],1),
                  'Avg Speed (km/h)':round(m['speed'],1),'Traffic':m['traffic'],
-                 'Travel Time Ratio':round(m['ratio'],2),'Fuel (L)':round(m['fuel_l'],2),
+                 'Travel Time Ratio (×)':f"{m['ratio']:.2f}×",'Fuel (L)':round(m['fuel_l'],2),
                  'Severe Segments':m['severe'],'High Segments':m['high'],'Route Score':round(m['score'],2)})
 comp=pd.DataFrame(rows)
-st.subheader('Interactive route map and map layers')
-shape_lookup = get_shape_lookup(shape)
-center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
-traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
-st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
-st.caption('Use the layer control on the map to toggle traffic congestion, individual routes, and base-map styles. Traffic colors are based on travel-time ratio, not live traffic feeds.')
-
 st.subheader('Multiple route comparison')
 st.dataframe(comp,use_container_width=True,hide_index=True)
+st.caption('Travel-time ratio unit: × (times). This is a dimensionless multiplier comparing segment travel time with its reference/free-flow travel time; it is not measured in minutes. For example, 1.93× means approximately 1.93 times the reference travel time.')
 
 # Traffic details and analysis
 c1,c2=st.columns(2)
 with c1:
     st.subheader('Selected route traffic details')
     detail=pd.DataFrame({
-        'Metric':['Congestion category','Travel Time Ratio','Severe segments','High segments','Moderate segments','Road sections'],
-        'Value':[best['traffic'],f"{best['ratio']:.2f}",best['severe'],best['high'],best['moderate'],len(route_edges(G,paths[best_idx]))]})
+        'Metric':['Congestion category','Travel-time ratio (×)','Severe segments','High segments','Moderate segments','Road sections'],
+        'Value':[best['traffic'],f"{best['ratio']:.2f}×",best['severe'],best['high'],best['moderate'],len(route_edges(G,paths[best_idx]))]})
     st.table(detail)
+    st.caption('Travel-time ratio is displayed in × (times), not min. ETA and travel duration use minutes (min).')
 with c2:
     st.subheader('Congestion distribution')
     dist=work['Travel Time Ratio'].apply(traffic_label).value_counts().reindex(['Low','Moderate','High','Severe']).fillna(0)
@@ -305,7 +490,11 @@ street_summary=(work.groupby('Street Name',dropna=False)
                 .reset_index())
 street_summary['Congestion']=street_summary['Avg_Travel_Time_Ratio'].apply(traffic_label)
 street_summary=street_summary.sort_values('Avg_Travel_Time_Ratio',ascending=False)
-st.dataframe(street_summary.round(2),use_container_width=True,hide_index=True)
+street_summary=street_summary.rename(columns={'Avg_Travel_Time_Ratio':'Avg Travel-time ratio (×)'})
+street_summary_display=street_summary.round(2)
+street_summary_display['Avg Travel-time ratio (×)']=street_summary_display['Avg Travel-time ratio (×)'].map(lambda v: f"{v:.2f}×" if pd.notna(v) else '—')
+st.dataframe(street_summary_display,use_container_width=True,hide_index=True)
+st.caption('Street-level average travel-time ratio is expressed as × (times); distance is km and average speed is km/h.')
 
 st.subheader('Dataset parameters used by this dashboard')
 st.markdown('**Available in workbook:** latitude, longitude, time window, segment distance, speed, travel time, travel-time ratio, speed reduction, congestion category, street/segment information and route percentiles.')
