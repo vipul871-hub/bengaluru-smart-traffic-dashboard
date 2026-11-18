@@ -140,29 +140,29 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
         max_zoom=19,
     ).add_to(m)
 
-    carto_attribution = "&copy; OpenStreetMap contributors &copy; CARTO"
-    # Use direct, key-free CARTO raster endpoints (without subdomain templating).
-    # These are mutually exclusive base layers; only one is displayed at a time.
+    # Esri ArcGIS public raster tiles are used for the alternate basemaps.
+    # They do not require an API key. ArcGIS tile URLs use {z}/{y}/{x} order.
+    esri_attribution = "Tiles &copy; Esri — Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), OpenStreetMap contributors, and the GIS User Community"
     folium.TileLayer(
-        tiles="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
         name="Light map — detailed",
-        attr=carto_attribution,
+        attr=esri_attribution,
         overlay=False,
         control=True,
         show=False,
-        max_zoom=20,
-        max_native_zoom=20,
+        max_zoom=19,
+        max_native_zoom=19,
     ).add_to(m)
 
     folium.TileLayer(
-        tiles="https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         name="Dark map — navigation",
-        attr=carto_attribution,
+        attr=esri_attribution,
         overlay=False,
         control=True,
         show=False,
-        max_zoom=20,
-        max_native_zoom=20,
+        max_zoom=16,
+        max_native_zoom=16,
     ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
@@ -424,7 +424,7 @@ shape_lookup = get_shape_lookup(shape)
 center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
 traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
 st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
-st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Select exactly one base map; traffic congestion and route lines remain independent overlays. Light and Dark maps use key-free CARTO tiles. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
+st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Select exactly one base map; traffic congestion and route lines remain independent overlays. Light and Dark maps use key-free Esri ArcGIS tiles. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
 # Small, unobtrusive voice assistant panel below the map; auto-welcome is attempted
 # after the map renders, and Replay voice is available if browser autoplay is blocked.
 components.html(welcome_html, height=66, scrolling=False)
