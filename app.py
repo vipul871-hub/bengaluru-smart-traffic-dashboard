@@ -1,5 +1,6 @@
 import os
 import math
+import json
 from io import BytesIO
 
 import numpy as np
@@ -408,57 +409,89 @@ for p in paths:
 best_idx=int(np.argmin([x['score'] for x in infos]))
 best=infos[best_idx]
 
-# Compact voice assistant panel. The voice still attempts to start after the map
-# has rendered; the small panel provides a visible fallback/replay control.
-welcome_html = r"""
+# Voice assistant: announce the first calculated route and announce again
+# whenever the selected start/destination (or traffic window) changes.
+route_signature = (str(window), str(start_street), str(end_street), str(start_label), str(end_label))
+previous_signature = st.session_state.get('_voice_route_signature')
+route_selection_changed = previous_signature != route_signature
+st.session_state['_voice_route_signature'] = route_signature
+
+route_name = ' to '.join(best['streets'][:5]) if best['streets'] else 'your selected destination'
+if route_selection_changed and previous_signature is None:
+    voice_message = (
+        f"Welcome to Bengaluru City Map. Your route has been calculated. "
+        f"Starting from {start_street}, heading to {end_street}. "
+        f"The recommended route is {route_name}. "
+        f"Estimated travel time is {best['time_min']:.1f} minutes, "
+        f"distance is {best['distance_km']:.1f} kilometres, "
+        f"and traffic is {best['traffic']}. Have a safe journey."
+    )
+elif route_selection_changed:
+    voice_message = (
+        f"Route updated. Your starting point is {start_street}, "
+        f"and your destination is {end_street}. "
+        f"The new recommended route is {route_name}. "
+        f"Estimated travel time is {best['time_min']:.1f} minutes, "
+        f"distance is {best['distance_km']:.1f} kilometres, "
+        f"and traffic is {best['traffic']}."
+    )
+else:
+    voice_message = (
+        f"Your route is ready. From {start_street} to {end_street}. "
+        f"Estimated travel time is {best['time_min']:.1f} minutes."
+    )
+
+# JSON encoding safely passes dynamic Python text into JavaScript.
+voice_message_js = json.dumps(voice_message)
+welcome_html = f"""
 <!doctype html>
 <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  * { box-sizing: border-box; }
-  body { margin:0; font-family:Arial,sans-serif; background:transparent; color:#17324f; }
-  .voice-card { display:flex; align-items:center; justify-content:space-between; gap:10px;
+  * {{ box-sizing: border-box; }}
+  body {{ margin:0; font-family:Arial,sans-serif; background:transparent; color:#17324f; }}
+  .voice-card {{ display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:9px 11px; border:1px solid #d8e4f2; border-radius:12px;
     background:linear-gradient(135deg,#ffffff 0%,#f1f6ff 100%);
-    box-shadow:0 3px 12px rgba(28,55,90,.08); }
-  .voice-copy { min-width:0; }
-  .voice-title { font-size:13px; font-weight:700; line-height:1.25; }
-  .voice-sub { font-size:11px; color:#64748b; margin-top:2px; }
-  button { flex:0 0 auto; border:0; border-radius:9px; padding:8px 11px;
-    background:#173f70; color:#fff; font-size:12px; font-weight:600; cursor:pointer; }
-  button:focus { outline:2px solid #60a5fa; outline-offset:2px; }
-  @media(max-width:480px) { .voice-card { padding:8px; } .voice-sub { display:none; } button { padding:8px; } }
+    box-shadow:0 3px 12px rgba(28,55,90,.08); }}
+  .voice-copy {{ min-width:0; }}
+  .voice-title {{ font-size:13px; font-weight:700; line-height:1.25; }}
+  .voice-sub {{ font-size:11px; color:#64748b; margin-top:2px; }}
+  button {{ flex:0 0 auto; border:0; border-radius:9px; padding:8px 11px;
+    background:#173f70; color:#fff; font-size:12px; font-weight:600; cursor:pointer; }}
+  button:focus {{ outline:2px solid #60a5fa; outline-offset:2px; }}
+  @media(max-width:480px) {{ .voice-card {{ padding:8px; }} .voice-sub {{ display:none; }} button {{ padding:8px; }} }}
 </style></head>
 <body>
 <div class="voice-card">
   <div class="voice-copy">
     <div class="voice-title">🔊 Bengaluru AI Navigation</div>
-    <div class="voice-sub" id="voiceStatus">English cinematic voice · Welcome assistant</div>
+    <div class="voice-sub" id="voiceStatus">Route voice assistant · Ready</div>
   </div>
   <button id="voiceButton" type="button">Replay voice</button>
 </div>
 <script>
-(function () {
-  const greeting = "Good day. Welcome to Bengaluru City Map. Navigation systems are online. Please select your starting point and destination. I will help you compare routes, estimated travel times, and congestion levels. Have a smooth and safe journey.";
+(function () {{
+  const greeting = {voice_message_js};
   const status = document.getElementById('voiceStatus');
   const button = document.getElementById('voiceButton');
   let hasStarted = false;
   let attemptCount = 0;
   const maxAttempts = 3;
 
-  function chooseVoice(voices) {
+  function chooseVoice(voices) {{
     return voices.find(v => /^en-GB$/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name)) ||
       voices.find(v => /^en-GB$/i.test(v.lang)) ||
       voices.find(v => /^en-IN$/i.test(v.lang)) ||
       voices.find(v => /^en/i.test(v.lang)) || null;
-  }
+  }}
 
-  function speakWelcome(isManual) {
-    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+  function speakWelcome(isManual) {{
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {{
       status.textContent = 'Speech is not supported by this browser';
       return;
-    }
+    }}
     if (hasStarted && !isManual) return;
-    try {
+    try {{
       const synth = window.speechSynthesis;
       synth.cancel();
       const utterance = new SpeechSynthesisUtterance(greeting);
@@ -468,48 +501,41 @@ welcome_html = r"""
       utterance.rate = 0.88;
       utterance.pitch = 0.78;
       utterance.volume = 1;
-      utterance.onstart = () => {
+      utterance.onstart = () => {{
         hasStarted = true;
-        status.textContent = 'Welcome message playing';
-      };
-      utterance.onend = () => { status.textContent = 'English AI voice · Ready'; };
-      utterance.onerror = (event) => {
+        status.textContent = 'Route announcement playing';
+      }};
+      utterance.onend = () => {{ status.textContent = 'Route announcement complete'; }};
+      utterance.onerror = () => {{
         status.textContent = 'Browser may require a tap on Replay voice';
-      };
+      }};
       synth.speak(utterance);
-      if (isManual) status.textContent = 'Starting welcome message…';
-    } catch (e) {
+      if (isManual) status.textContent = 'Starting route announcement…';
+    }} catch (e) {{
       status.textContent = 'Tap Replay voice if automatic audio is blocked';
-    }
-  }
+    }}
+  }}
 
   button.addEventListener('click', () => speakWelcome(true));
 
-  // The component is rendered immediately after st_folium. Try only after
-  // the map/dashboard has had time to paint, and retry briefly if voices load late.
-  function autoStart() {
+  // This component is refreshed by Streamlit when the route selection changes.
+  // Try automatically after rendering; browsers may still require prior user interaction.
+  function autoStart() {{
     if (hasStarted || attemptCount >= maxAttempts) return;
     attemptCount += 1;
     speakWelcome(false);
-  }
-  window.addEventListener('load', () => {
-    window.setTimeout(autoStart, 1800);
-    window.setTimeout(autoStart, 3500);
-  });
-  if (document.readyState === 'complete') {
-    window.setTimeout(autoStart, 1800);
-  }
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.onvoiceschanged = () => {
+  }}
+  window.addEventListener('load', () => {{
+    window.setTimeout(autoStart, 1200);
+    window.setTimeout(autoStart, 2800);
+  }});
+  if (document.readyState === 'complete') window.setTimeout(autoStart, 1200);
+  if ('speechSynthesis' in window) {{
+    window.speechSynthesis.onvoiceschanged = () => {{
       if (!hasStarted) window.setTimeout(autoStart, 500);
-    };
-  }
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !hasStarted && attemptCount < maxAttempts) {
-      window.setTimeout(autoStart, 900);
-    }
-  });
-})();
+    }};
+  }}
+}})();
 </script>
 </body></html>
 """
