@@ -14,22 +14,117 @@ st.set_page_config(page_title='Bengaluru Traffic Route Dashboard', page_icon='ðŸ
 
 DEFAULT_FILE = 'Bengaluru_Traffic_Analysis_Converted.xlsx'
 
-# Clean, responsive theme. This does not require a map API key.
+# Clean, responsive light theme with explicit text colours for readability.
+# Explicit colours prevent low-contrast text when the viewer's Streamlit/browser
+# theme is dark while this dashboard background is light.
 st.markdown("""
 <style>
-    .stApp { background: linear-gradient(180deg, #f5f8ff 0%, #f8fafc 260px, #f8fafc 100%); }
+    :root { color-scheme: light; }
+
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {
+        background: linear-gradient(180deg, #f5f8ff 0%, #f8fafc 260px, #f8fafc 100%);
+        color: #1f2937 !important;
+    }
     .block-container { max-width: 1580px; padding-top: 1.15rem; padding-bottom: 2rem; }
-    [data-testid="stHeader"] { background: rgba(248,250,252,0.88); }
-    [data-testid="stSidebar"] { background: #eef4ff; border-right: 1px solid #dbe5f4; }
-    [data-testid="stMetric"] { background: #ffffff; border: 1px solid #dce6f3; border-radius: 15px; padding: 14px 16px; box-shadow: 0 4px 14px rgba(25, 54, 94, 0.045); min-width: 0; overflow: visible; }
-    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] div { color: #52657d; white-space: normal !important; overflow-wrap: anywhere; }
-    /* Keep the entire metric value and its unit visible instead of Streamlit's ellipsis. */
-    [data-testid="stMetricValue"], [data-testid="stMetricValue"] > div { font-size: clamp(1.35rem, 1.75vw, 1.9rem) !important; line-height: 1.22 !important; white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+    [data-testid="stHeader"] { background: rgba(248,250,252,0.96); }
+
+    /* Main page and sidebar text */
+    .stApp p,
+    .stApp label,
+    .stApp li,
+    .stApp [data-testid="stMarkdownContainer"],
+    .stApp [data-testid="stMarkdownContainer"] p,
+    .stApp [data-testid="stMarkdownContainer"] li,
+    .stApp [data-testid="stWidgetLabel"] p,
+    .stApp [data-testid="stCaptionContainer"] p {
+        color: #26384d !important;
+    }
+    .stApp h1 { color: #122642 !important; letter-spacing: -0.035em; }
+    .stApp h2, .stApp h3 { color: #193858 !important; letter-spacing: -0.02em; }
+    [data-testid="stSidebar"] {
+        background: #eef4ff !important;
+        border-right: 1px solid #dbe5f4;
+        color: #20344c !important;
+    }
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+        color: #20344c !important;
+    }
+    [data-testid="stCaptionContainer"] p { color: #596b80 !important; }
+
+    /* Inputs, dropdowns and their option menus */
+    .stApp input,
+    .stApp textarea {
+        color: #172b42 !important;
+        background-color: #ffffff !important;
+        -webkit-text-fill-color: #172b42 !important;
+    }
+    .stApp [data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        color: #172b42 !important;
+        border-color: #b8c9dc !important;
+    }
+    .stApp [data-baseweb="select"] *,
+    [data-baseweb="popover"] *,
+    [role="listbox"] *,
+    [role="option"] {
+        color: #172b42 !important;
+    }
+    .stApp [data-testid="stCheckbox"] label,
+    .stApp [data-testid="stRadio"] label { color: #20344c !important; }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: #ffffff !important;
+        color: #172b42 !important;
+        border: 1px solid #dce6f3;
+        border-radius: 15px;
+        padding: 14px 16px;
+        box-shadow: 0 4px 14px rgba(25, 54, 94, 0.045);
+        min-width: 0;
+        overflow: visible;
+    }
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricLabel"] div { color: #52657d !important; white-space: normal !important; overflow-wrap: anywhere; }
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricValue"] > div {
+        color: #122642 !important;
+        font-size: clamp(1.35rem, 1.75vw, 1.9rem) !important;
+        line-height: 1.22 !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
     [data-testid="stMetricValue"] { min-width: 0; }
-    div[data-testid="stDataFrame"], div[data-testid="stTable"] { border-radius: 12px; overflow: hidden; }
-    .stButton > button, .stDownloadButton > button { border-radius: 12px; font-weight: 600; }
-    h1 { color: #122642; letter-spacing: -0.035em; }
-    h2, h3 { color: #193858; letter-spacing: -0.02em; }
+
+    /* Alerts, data tables and buttons */
+    [data-testid="stAlert"] { color: #20344c !important; }
+    div[data-testid="stDataFrame"], div[data-testid="stTable"] {
+        border-radius: 12px;
+        overflow: hidden;
+        color: #20344c !important;
+        color-scheme: light;
+    }
+    .stButton > button,
+    .stDownloadButton > button {
+        border-radius: 12px;
+        font-weight: 600;
+        color: #ffffff !important;
+        background: #174a7e !important;
+        border: 1px solid #174a7e !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        color: #ffffff !important;
+        background: #10395f !important;
+        border-color: #10395f !important;
+    }
+
     @media (max-width: 768px) {
         .block-container { padding: 0.75rem 0.65rem 1.25rem; }
         [data-testid="stMetric"] { padding: 9px 10px; }
