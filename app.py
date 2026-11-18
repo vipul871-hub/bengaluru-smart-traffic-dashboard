@@ -346,49 +346,74 @@ welcome_html = r"""
   const greeting = "Good day. Welcome to Bengaluru City Map. Navigation systems are online. Please select your starting point and destination. I will help you compare routes, estimated travel times, and congestion levels. Have a smooth and safe journey.";
   const status = document.getElementById('voiceStatus');
   const button = document.getElementById('voiceButton');
-  let voicesReady = false;
+  let hasStarted = false;
+  let attemptCount = 0;
+  const maxAttempts = 3;
+
   function chooseVoice(voices) {
-    return voices.find(v => /^en-GB$/i.test(v.lang)) ||
-      voices.find(v => /^en/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name)) ||
+    return voices.find(v => /^en-GB$/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name)) ||
+      voices.find(v => /^en-GB$/i.test(v.lang)) ||
       voices.find(v => /^en-IN$/i.test(v.lang)) ||
       voices.find(v => /^en/i.test(v.lang)) || null;
   }
+
   function speakWelcome(isManual) {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
       status.textContent = 'Speech is not supported by this browser';
       return;
     }
+    if (hasStarted && !isManual) return;
     try {
-      window.speechSynthesis.cancel();
+      const synth = window.speechSynthesis;
+      synth.cancel();
       const utterance = new SpeechSynthesisUtterance(greeting);
-      const voice = chooseVoice(window.speechSynthesis.getVoices());
+      const voice = chooseVoice(synth.getVoices());
       if (voice) utterance.voice = voice;
       utterance.lang = voice ? voice.lang : 'en-GB';
       utterance.rate = 0.88;
       utterance.pitch = 0.78;
       utterance.volume = 1;
-      utterance.onstart = () => { status.textContent = 'Speaking welcome message…'; };
-      utterance.onend = () => { status.textContent = 'English cinematic voice · Ready'; };
-      utterance.onerror = () => { status.textContent = 'Tap Replay voice if audio was blocked'; };
-      window.speechSynthesis.speak(utterance);
-      if (isManual) status.textContent = 'Playing welcome message…';
-    } catch (e) { status.textContent = 'Tap Replay voice to try again'; }
+      utterance.onstart = () => {
+        hasStarted = true;
+        status.textContent = 'Welcome message playing';
+      };
+      utterance.onend = () => { status.textContent = 'English AI voice · Ready'; };
+      utterance.onerror = (event) => {
+        status.textContent = 'Browser may require a tap on Replay voice';
+      };
+      synth.speak(utterance);
+      if (isManual) status.textContent = 'Starting welcome message…';
+    } catch (e) {
+      status.textContent = 'Tap Replay voice if automatic audio is blocked';
+    }
   }
+
   button.addEventListener('click', () => speakWelcome(true));
-  // Run once per browser tab/session after the map section has been rendered.
-  const key = 'bengaluru-map-welcome-attempted-v5';
-  let alreadyAttempted = false;
-  try { alreadyAttempted = sessionStorage.getItem(key) === 'yes'; } catch(e) {}
-  if (!alreadyAttempted) {
-    try { sessionStorage.setItem(key, 'yes'); } catch(e) {}
-    window.setTimeout(() => {
-      const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-      if (window.speechSynthesis && voices.length === 0) {
-        window.speechSynthesis.onvoiceschanged = () => speakWelcome(false);
-        window.setTimeout(() => speakWelcome(false), 1000);
-      } else { speakWelcome(false); }
-    }, 2600);
+
+  // The component is rendered immediately after st_folium. Try only after
+  // the map/dashboard has had time to paint, and retry briefly if voices load late.
+  function autoStart() {
+    if (hasStarted || attemptCount >= maxAttempts) return;
+    attemptCount += 1;
+    speakWelcome(false);
   }
+  window.addEventListener('load', () => {
+    window.setTimeout(autoStart, 1800);
+    window.setTimeout(autoStart, 3500);
+  });
+  if (document.readyState === 'complete') {
+    window.setTimeout(autoStart, 1800);
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      if (!hasStarted) window.setTimeout(autoStart, 500);
+    };
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !hasStarted && attemptCount < maxAttempts) {
+      window.setTimeout(autoStart, 900);
+    }
+  });
 })();
 </script>
 </body></html>
