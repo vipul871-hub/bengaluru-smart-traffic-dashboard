@@ -8,8 +8,6 @@ import networkx as nx
 import streamlit as st
 import streamlit.components.v1 as components
 import folium
-from branca.element import MacroElement
-from jinja2 import Template
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title='Bengaluru Traffic Route Dashboard', page_icon='🚦', layout='wide')
@@ -128,12 +126,12 @@ def get_shape_lookup(shape_df):
 
 
 def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
-    # Keep exactly one basemap active by default. Explicit Esri tile URLs avoid
-    # relying on provider aliases that may fail in some browser/network setups.
-    # Esri's public gray basemaps do not require an API key.
+    # Three independent base maps. Leaflet's LayerControl treats these as
+    # mutually exclusive base layers, while traffic and route layers remain
+    # transparent overlays. Explicit, key-free URLs avoid provider-alias issues.
     m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
 
-    street_base = folium.TileLayer(
+    folium.TileLayer(
         tiles="OpenStreetMap",
         name="Street map",
         overlay=False,
@@ -142,54 +140,27 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
         max_zoom=19,
     ).add_to(m)
 
-    esri_attribution = (
-        "Tiles © Esri — Sources: Esri, HERE, Garmin, and the GIS User Community; "
-        "map data includes © OpenStreetMap contributors"
-    )
-    light_base = folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    carto_attribution = "&copy; OpenStreetMap contributors &copy; CARTO"
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
         name="Light map",
-        attr=esri_attribution,
+        attr=carto_attribution,
+        subdomains="abcd",
         overlay=False,
         control=True,
         show=False,
-        max_zoom=19,
-        max_native_zoom=16,
+        max_zoom=20,
     ).add_to(m)
 
-    dark_base = folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
         name="Dark map",
-        attr=esri_attribution,
+        attr=carto_attribution,
+        subdomains="abcd",
         overlay=False,
         control=True,
         show=False,
-        max_zoom=19,
-        max_native_zoom=16,
-    ).add_to(m)
-
-    # Esri publishes labels as transparent reference layers. Add them automatically
-    # only when the matching Light/Dark basemap is selected; the Street map remains
-    # unchanged and no extra checkbox is needed in the layer control.
-    light_labels = folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
-        name="Light map labels",
-        attr=esri_attribution,
-        overlay=True,
-        control=False,
-        show=False,
-        max_zoom=19,
-        max_native_zoom=16,
-    ).add_to(m)
-    dark_labels = folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
-        name="Dark map labels",
-        attr=esri_attribution,
-        overlay=True,
-        control=False,
-        show=False,
-        max_zoom=19,
-        max_native_zoom=16,
+        max_zoom=20,
     ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
@@ -207,7 +178,7 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
                 coords = pts if pts and len(pts) >= 2 else [a, b]
                 street = str(row.get('Street Name', 'Unknown road'))
                 speed = row.get('Average Speed (km/h)', np.nan)
-                tip = f"{street} | {label} | travel-time ratio {ratio:.2f} | speed {speed:.1f} km/h" if pd.notna(speed) else f"{street} | {label} | travel-time ratio {ratio:.2f}"
+                tip = f"{street} | {label} | travel-time ratio {ratio:.2f}× | speed {speed:.1f} km/h" if pd.notna(speed) else f"{street} | {label} | travel-time ratio {ratio:.2f}×"
                 folium.PolyLine(coords, color=color, weight=4, opacity=0.72, tooltip=tip).add_to(traffic_fg)
             except (TypeError, ValueError, KeyError):
                 continue
@@ -241,40 +212,6 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
         folium.Marker(route_paths[0][-1], tooltip='Destination', icon=folium.Icon(color='red', icon='flag')).add_to(m)
     folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
-    # Switch matching transparent labels automatically with Light/Dark map layers.
-    # Use a MacroElement attached to the map so this runs after Leaflet's map and
-    # tile-layer variables have been initialized in the generated HTML.
-    class BaseLayerLabelSync(MacroElement):
-        _template = Template("""
-        {% macro script(this, kwargs) %}
-        (function() {
-          var map = {{ this._parent.get_name() }};
-          var lightBase = {{ this.light_base }};
-          var darkBase = {{ this.dark_base }};
-          var lightLabels = {{ this.light_labels }};
-          var darkLabels = {{ this.dark_labels }};
-          function clearReferenceLabels() {
-            if (map.hasLayer(lightLabels)) map.removeLayer(lightLabels);
-            if (map.hasLayer(darkLabels)) map.removeLayer(darkLabels);
-          }
-          map.on('baselayerchange', function(event) {
-            clearReferenceLabels();
-            if (event.layer === lightBase) lightLabels.addTo(map);
-            if (event.layer === darkBase) darkLabels.addTo(map);
-          });
-        })();
-        {% endmacro %}
-        """)
-
-        def __init__(self, light_base, dark_base, light_labels, dark_labels):
-            super().__init__()
-            self._name = "BaseLayerLabelSync"
-            self.light_base = light_base.get_name()
-            self.dark_base = dark_base.get_name()
-            self.light_labels = light_labels.get_name()
-            self.dark_labels = dark_labels.get_name()
-
-    m.add_child(BaseLayerLabelSync(light_base, dark_base, light_labels, dark_labels))
     return m
 
 st.title('🚦 Bengaluru City Map')
@@ -374,9 +311,9 @@ for p in paths:
 best_idx=int(np.argmin([x['score'] for x in infos]))
 best=infos[best_idx]
 
-# Welcome panel: short connection-style animation, then a browser-based spoken greeting.
-# Speech uses the device/browser voice and needs no paid API key. Some mobile browsers
-# block autoplay, so the visible voice button is the reliable fallback.
+# Welcome panel: render it AFTER the map so the greeting starts only once the map
+# has appeared in the dashboard. Speech uses the device/browser English voice and
+# needs no paid API key. Some browsers block autoplay, so the visible button is fallback.
 welcome_html = r"""
 <!doctype html>
 <html>
@@ -459,6 +396,7 @@ welcome_html = r"""
     }
     try {
       window.speechSynthesis.cancel();
+      if (typeof window.speechSynthesis.resume === 'function') window.speechSynthesis.resume();
       const utterance = new SpeechSynthesisUtterance(greeting);
       const voices = window.speechSynthesis.getVoices();
       const style = voiceStyle.value;
@@ -477,7 +415,7 @@ welcome_html = r"""
       else voiceHint.textContent = 'Voice selected: ' + voice.name + ' (' + voice.lang + ').';
       utterance.onstart = () => { status.textContent = 'Playing cinematic navigation welcome…'; };
       utterance.onend = () => { status.textContent = 'Welcome message finished. Have a safe journey!'; };
-      utterance.onerror = () => { status.textContent = 'Tap “Enable welcome voice” to retry audio.'; };
+      utterance.onerror = () => { status.textContent = 'Automatic audio was blocked. Tap Enable voice to start the welcome.'; voiceButton.textContent = '🔊 Enable voice'; voiceHint.textContent = 'Your browser may require a tap before it will play speech.'; };
       window.speechSynthesis.speak(utterance);
     } catch (err) {
       status.textContent = 'Tap “Enable welcome voice” to retry audio.';
@@ -489,30 +427,38 @@ welcome_html = r"""
     voiceButton.textContent = '🔊 Replay voice';
   });
 
-  // Keep the connection-style introduction brief; do not block the dashboard or map.
+  // The component is placed after the map in the Streamlit page. Wait briefly so
+  // the map and route layers have time to become visible before starting the welcome.
   window.setTimeout(function () {
     setReady();
+    status.textContent = 'Map displayed. Preparing your English voice welcome…';
     let alreadyAttempted = false;
-    try { alreadyAttempted = sessionStorage.getItem('bengaluru-map-welcome-attempted-v2') === 'yes'; } catch (e) {}
+    try { alreadyAttempted = sessionStorage.getItem('bengaluru-map-welcome-attempted-v3') === 'yes'; } catch (e) {}
     if (!alreadyAttempted) {
-      try { sessionStorage.setItem('bengaluru-map-welcome-attempted-v2', 'yes'); } catch (e) {}
-      speakWelcome(); // Browsers may require a user tap; the button above is the fallback.
+      try { sessionStorage.setItem('bengaluru-map-welcome-attempted-v3', 'yes'); } catch (e) {}
+      window.setTimeout(function () {
+        speakWelcome(); // Best-effort autoplay; some browsers require a tap.
+      }, 2200);
+    } else {
+      status.textContent = 'Map is ready. Use Replay Voice to hear the welcome again.';
+      voiceButton.textContent = '🔊 Replay voice';
     }
-  }, 1350);
+  }, 500);
 })();
 </script>
 </body>
 </html>
 """
-components.html(welcome_html, height=194, scrolling=False)
 
-# Put the interactive route map near the top so it is the first major dashboard view.
+# Put the interactive route map before the welcome panel. This way the voice component
+# only loads after Streamlit has rendered the map section, followed by a short JS delay.
 st.subheader('🗺️ Interactive Bengaluru map')
 shape_lookup = get_shape_lookup(shape)
 center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
 traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
 st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
 st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Traffic congestion and route lines stay visible above the selected base map. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
+components.html(welcome_html, height=194, scrolling=False)
 
 # KPIs — use two rows of three cards so values and units remain readable on desktop and mobile.
 st.subheader('Optimal route')
@@ -524,7 +470,7 @@ kpi_rows = [
     ],
     [
         ('Traffic condition', str(best['traffic'])),
-        ('Travel-time ratio', f"{best['ratio']:.2f}×"),
+        ('Travel-time ratio (×)', f"{best['ratio']:.2f}×"),
         ('Estimated fuel', f"{best['fuel_l']:.2f} L"),
     ],
 ]
@@ -536,6 +482,7 @@ for row_items in kpi_rows:
 
 eta_minutes = int(round(best['time_min']))
 eta_clock = (pd.Timestamp.combine(pd.Timestamp.today().date(), departure_time) + pd.Timedelta(minutes=eta_minutes)).strftime('%I:%M %p')
+st.caption('Unit guide: ETA and route duration are shown in minutes (min); distance in kilometres (km); speed in kilometres per hour (km/h); fuel in litres (L). Travel-time ratio is a relative multiplier (×), not a time duration.')
 st.info(f"Recommended Route {best_idx+1}: {' → '.join(best['streets'][:8])}{' → …' if len(best['streets'])>8 else ''}\n\nEstimated arrival: {eta_clock} (using the selected time-window traffic estimate).")
 
 # Route table
@@ -544,7 +491,7 @@ for i,m in enumerate(infos,1):
     rows.append({'Route':f'Route {i}','Recommended':'✓' if i-1==best_idx else '',
                  'Distance (km)':round(m['distance_km'],2),'ETA (min)':round(m['time_min'],1),
                  'Avg Speed (km/h)':round(m['speed'],1),'Traffic':m['traffic'],
-                 'Travel Time Ratio':round(m['ratio'],2),'Fuel (L)':round(m['fuel_l'],2),
+                 'Travel Time Ratio (×)':f"{m['ratio']:.2f}×",'Fuel (L)':round(m['fuel_l'],2),
                  'Severe Segments':m['severe'],'High Segments':m['high'],'Route Score':round(m['score'],2)})
 comp=pd.DataFrame(rows)
 st.subheader('Multiple route comparison')
@@ -555,8 +502,8 @@ c1,c2=st.columns(2)
 with c1:
     st.subheader('Selected route traffic details')
     detail=pd.DataFrame({
-        'Metric':['Congestion category','Travel Time Ratio','Severe segments','High segments','Moderate segments','Road sections'],
-        'Value':[best['traffic'],f"{best['ratio']:.2f}",best['severe'],best['high'],best['moderate'],len(route_edges(G,paths[best_idx]))]})
+        'Metric':['Congestion category','Travel-time ratio (×)','Severe segments','High segments','Moderate segments','Road sections'],
+        'Value':[best['traffic'],f"{best['ratio']:.2f}×",best['severe'],best['high'],best['moderate'],len(route_edges(G,paths[best_idx]))]})
     st.table(detail)
 with c2:
     st.subheader('Congestion distribution')
@@ -572,7 +519,10 @@ street_summary=(work.groupby('Street Name',dropna=False)
                 .reset_index())
 street_summary['Congestion']=street_summary['Avg_Travel_Time_Ratio'].apply(traffic_label)
 street_summary=street_summary.sort_values('Avg_Travel_Time_Ratio',ascending=False)
-st.dataframe(street_summary.round(2),use_container_width=True,hide_index=True)
+street_summary=street_summary.rename(columns={'Avg_Travel_Time_Ratio':'Avg Travel-time ratio (×)'})
+street_summary_display=street_summary.round(2)
+street_summary_display['Avg Travel-time ratio (×)']=street_summary_display['Avg Travel-time ratio (×)'].map(lambda v: f"{v:.2f}×" if pd.notna(v) else '—')
+st.dataframe(street_summary_display,use_container_width=True,hide_index=True)
 
 st.subheader('Dataset parameters used by this dashboard')
 st.markdown('**Available in workbook:** latitude, longitude, time window, segment distance, speed, travel time, travel-time ratio, speed reduction, congestion category, street/segment information and route percentiles.')
