@@ -416,29 +416,42 @@ previous_signature = st.session_state.get('_voice_route_signature')
 route_selection_changed = previous_signature != route_signature
 st.session_state['_voice_route_signature'] = route_signature
 
-route_name = ' to '.join(best['streets'][:5]) if best['streets'] else 'your selected destination'
+# Format road names as a natural spoken route instead of reading "to" repeatedly.
+route_streets = [str(name).strip() for name in best.get('streets', [])[:5] if str(name).strip()]
+if len(route_streets) >= 3:
+    route_description = ", ".join(route_streets[:-1]) + f", and {route_streets[-1]}"
+elif len(route_streets) == 2:
+    route_description = f"{route_streets[0]} and {route_streets[1]}"
+elif len(route_streets) == 1:
+    route_description = route_streets[0]
+else:
+    route_description = "the route highlighted on the map"
+
 if route_selection_changed and previous_signature is None:
     voice_message = (
-        f"Welcome to Bengaluru City Map. Your route has been calculated. "
-        f"Starting from {start_street}, heading to {end_street}. "
-        f"The recommended route is {route_name}. "
-        f"Estimated travel time is {best['time_min']:.1f} minutes, "
-        f"distance is {best['distance_km']:.1f} kilometres, "
-        f"and traffic is {best['traffic']}. Have a safe journey."
+        f"Welcome to Bengaluru City Map. Your route has been calculated successfully. "
+        f"Your starting point is {start_street}. Your destination is {end_street}. "
+        f"The recommended route follows {route_description}. "
+        f"Your estimated travel time is {best['time_min']:.1f} minutes. "
+        f"The total route distance is {best['distance_km']:.1f} kilometres. "
+        f"The predicted traffic level for this route is {best['traffic']}. "
+        f"Please follow the route displayed on the map. Have a safe journey."
     )
 elif route_selection_changed:
     voice_message = (
-        f"Route updated. Your starting point is {start_street}, "
-        f"and your destination is {end_street}. "
-        f"The new recommended route is {route_name}. "
-        f"Estimated travel time is {best['time_min']:.1f} minutes, "
-        f"distance is {best['distance_km']:.1f} kilometres, "
-        f"and traffic is {best['traffic']}."
+        f"Your route has been updated. Your starting point is {start_street}. "
+        f"Your destination is {end_street}. "
+        f"The new recommended route follows {route_description}. "
+        f"Your estimated travel time is {best['time_min']:.1f} minutes. "
+        f"The total route distance is {best['distance_km']:.1f} kilometres. "
+        f"The predicted traffic level for this route is {best['traffic']}. "
+        f"Please follow the updated route displayed on the map."
     )
 else:
     voice_message = (
-        f"Your route is ready. From {start_street} to {end_street}. "
-        f"Estimated travel time is {best['time_min']:.1f} minutes."
+        f"Your route from {start_street} to {end_street} is ready. "
+        f"The estimated travel time is {best['time_min']:.1f} minutes. "
+        f"The total route distance is {best['distance_km']:.1f} kilometres."
     )
 
 # JSON encoding safely passes dynamic Python text into JavaScript.
@@ -465,7 +478,7 @@ welcome_html = f"""
 <div class="voice-card">
   <div class="voice-copy">
     <div class="voice-title">🔊 Bengaluru AI Navigation</div>
-    <div class="voice-sub" id="voiceStatus">Route voice assistant · Ready</div>
+    <div class="voice-sub" id="voiceStatus">Clear navigation announcement · Ready</div>
   </div>
   <button id="voiceButton" type="button">Replay voice</button>
 </div>
@@ -479,10 +492,20 @@ welcome_html = f"""
   const maxAttempts = 3;
 
   function chooseVoice(voices) {{
-    return voices.find(v => /^en-GB$/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name)) ||
-      voices.find(v => /^en-GB$/i.test(v.lang)) ||
-      voices.find(v => /^en-IN$/i.test(v.lang)) ||
-      voices.find(v => /^en/i.test(v.lang)) || null;
+    // Prefer a natural-sounding Indian English voice, then a clear English fallback.
+    const languagePriority = ['en-IN', 'en-GB', 'en-US'];
+    const naturalVoice = /natural|neural|enhanced|premium/i;
+    for (const language of languagePriority) {{
+      const enhanced = voices.find(v => v.lang &&
+        v.lang.toLowerCase() === language.toLowerCase() && naturalVoice.test(v.name));
+      if (enhanced) return enhanced;
+    }}
+    for (const language of languagePriority) {{
+      const regionalVoice = voices.find(v => v.lang &&
+        v.lang.toLowerCase() === language.toLowerCase());
+      if (regionalVoice) return regionalVoice;
+    }}
+    return voices.find(v => /^en(-|$)/i.test(v.lang)) || null;
   }}
 
   function speakWelcome(isManual) {{
@@ -497,9 +520,9 @@ welcome_html = f"""
       const utterance = new SpeechSynthesisUtterance(greeting);
       const voice = chooseVoice(synth.getVoices());
       if (voice) utterance.voice = voice;
-      utterance.lang = voice ? voice.lang : 'en-GB';
-      utterance.rate = 0.88;
-      utterance.pitch = 0.78;
+      utterance.lang = voice ? voice.lang : 'en-IN';
+      utterance.rate = 0.93;
+      utterance.pitch = 1.0;
       utterance.volume = 1;
       utterance.onstart = () => {{
         hasStarted = true;
