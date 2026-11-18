@@ -8,6 +8,8 @@ import networkx as nx
 import streamlit as st
 import streamlit.components.v1 as components
 import folium
+from branca.element import MacroElement
+from jinja2 import Template
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title='Bengaluru Traffic Route Dashboard', page_icon='🚦', layout='wide')
@@ -21,8 +23,11 @@ st.markdown("""
     .block-container { max-width: 1580px; padding-top: 1.15rem; padding-bottom: 2rem; }
     [data-testid="stHeader"] { background: rgba(248,250,252,0.88); }
     [data-testid="stSidebar"] { background: #eef4ff; border-right: 1px solid #dbe5f4; }
-    [data-testid="stMetric"] { background: #ffffff; border: 1px solid #dce6f3; border-radius: 15px; padding: 13px 15px; box-shadow: 0 4px 14px rgba(25, 54, 94, 0.045); }
-    [data-testid="stMetricLabel"] { color: #52657d; }
+    [data-testid="stMetric"] { background: #ffffff; border: 1px solid #dce6f3; border-radius: 15px; padding: 14px 16px; box-shadow: 0 4px 14px rgba(25, 54, 94, 0.045); min-width: 0; overflow: visible; }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] div { color: #52657d; white-space: normal !important; overflow-wrap: anywhere; }
+    /* Keep the entire metric value and its unit visible instead of Streamlit's ellipsis. */
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] > div { font-size: clamp(1.35rem, 1.75vw, 1.9rem) !important; line-height: 1.22 !important; white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+    [data-testid="stMetricValue"] { min-width: 0; }
     div[data-testid="stDataFrame"], div[data-testid="stTable"] { border-radius: 12px; overflow: hidden; }
     .stButton > button, .stDownloadButton > button { border-radius: 12px; font-weight: 600; }
     h1 { color: #122642; letter-spacing: -0.035em; }
@@ -123,10 +128,69 @@ def get_shape_lookup(shape_df):
 
 
 def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
+    # Keep exactly one basemap active by default. Explicit Esri tile URLs avoid
+    # relying on provider aliases that may fail in some browser/network setups.
+    # Esri's public gray basemaps do not require an API key.
     m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
-    folium.TileLayer("OpenStreetMap", name="Street map", control=True).add_to(m)
-    folium.TileLayer("CartoDB positron", name="Light map", control=True).add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="Dark map", control=True).add_to(m)
+
+    street_base = folium.TileLayer(
+        tiles="OpenStreetMap",
+        name="Street map",
+        overlay=False,
+        control=True,
+        show=True,
+        max_zoom=19,
+    ).add_to(m)
+
+    esri_attribution = (
+        "Tiles © Esri — Sources: Esri, HERE, Garmin, and the GIS User Community; "
+        "map data includes © OpenStreetMap contributors"
+    )
+    light_base = folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        name="Light map",
+        attr=esri_attribution,
+        overlay=False,
+        control=True,
+        show=False,
+        max_zoom=19,
+        max_native_zoom=16,
+    ).add_to(m)
+
+    dark_base = folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        name="Dark map",
+        attr=esri_attribution,
+        overlay=False,
+        control=True,
+        show=False,
+        max_zoom=19,
+        max_native_zoom=16,
+    ).add_to(m)
+
+    # Esri publishes labels as transparent reference layers. Add them automatically
+    # only when the matching Light/Dark basemap is selected; the Street map remains
+    # unchanged and no extra checkbox is needed in the layer control.
+    light_labels = folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+        name="Light map labels",
+        attr=esri_attribution,
+        overlay=True,
+        control=False,
+        show=False,
+        max_zoom=19,
+        max_native_zoom=16,
+    ).add_to(m)
+    dark_labels = folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+        name="Dark map labels",
+        attr=esri_attribution,
+        overlay=True,
+        control=False,
+        show=False,
+        max_zoom=19,
+        max_native_zoom=16,
+    ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
     if traffic_df is not None:
@@ -175,7 +239,42 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
     if route_paths:
         folium.Marker(route_paths[0][0], tooltip='Selected start', icon=folium.Icon(color='green', icon='play')).add_to(m)
         folium.Marker(route_paths[0][-1], tooltip='Destination', icon=folium.Icon(color='red', icon='flag')).add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+
+    # Switch matching transparent labels automatically with Light/Dark map layers.
+    # Use a MacroElement attached to the map so this runs after Leaflet's map and
+    # tile-layer variables have been initialized in the generated HTML.
+    class BaseLayerLabelSync(MacroElement):
+        _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function() {
+          var map = {{ this._parent.get_name() }};
+          var lightBase = {{ this.light_base }};
+          var darkBase = {{ this.dark_base }};
+          var lightLabels = {{ this.light_labels }};
+          var darkLabels = {{ this.dark_labels }};
+          function clearReferenceLabels() {
+            if (map.hasLayer(lightLabels)) map.removeLayer(lightLabels);
+            if (map.hasLayer(darkLabels)) map.removeLayer(darkLabels);
+          }
+          map.on('baselayerchange', function(event) {
+            clearReferenceLabels();
+            if (event.layer === lightBase) lightLabels.addTo(map);
+            if (event.layer === darkBase) darkLabels.addTo(map);
+          });
+        })();
+        {% endmacro %}
+        """)
+
+        def __init__(self, light_base, dark_base, light_labels, dark_labels):
+            super().__init__()
+            self._name = "BaseLayerLabelSync"
+            self.light_base = light_base.get_name()
+            self.dark_base = dark_base.get_name()
+            self.light_labels = light_labels.get_name()
+            self.dark_labels = dark_labels.get_name()
+
+    m.add_child(BaseLayerLabelSync(light_base, dark_base, light_labels, dark_labels))
     return m
 
 st.title('🚦 Bengaluru City Map')
@@ -413,13 +512,27 @@ shape_lookup = get_shape_lookup(shape)
 center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
 traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
 st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
-st.caption('Use the layer control to toggle traffic congestion, individual route alternatives, and base-map styles. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
+st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Traffic congestion and route lines stay visible above the selected base map. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
 
-# KPIs
+# KPIs — use two rows of three cards so values and units remain readable on desktop and mobile.
 st.subheader('Optimal route')
-cols=st.columns(6)
-labels=[('ETA',f"{best['time_min']:.1f} min"),('Distance',f"{best['distance_km']:.2f} km"),('Avg speed',f"{best['speed']:.1f} km/h"),('Traffic',best['traffic']),('Travel-time ratio',f"{best['ratio']:.2f}"),('Fuel estimate',f"{best['fuel_l']:.2f} L")]
-for c,(lab,val) in zip(cols,labels): c.metric(lab,val)
+kpi_rows = [
+    [
+        ('ETA', f"{best['time_min']:.1f} min"),
+        ('Distance', f"{best['distance_km']:.2f} km"),
+        ('Average speed', f"{best['speed']:.1f} km/h"),
+    ],
+    [
+        ('Traffic condition', str(best['traffic'])),
+        ('Travel-time ratio', f"{best['ratio']:.2f}×"),
+        ('Estimated fuel', f"{best['fuel_l']:.2f} L"),
+    ],
+]
+for row_items in kpi_rows:
+    cols = st.columns(3, gap="medium")
+    for col, (label, value) in zip(cols, row_items):
+        with col:
+            st.metric(label, value)
 
 eta_minutes = int(round(best['time_min']))
 eta_clock = (pd.Timestamp.combine(pd.Timestamp.today().date(), departure_time) + pd.Timedelta(minutes=eta_minutes)).strftime('%I:%M %p')
