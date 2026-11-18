@@ -329,28 +329,33 @@ def route_map(route_paths, route_info, shape_lookup, center, traffic_df=None):
 
     carto_attribution = '&copy; OpenStreetMap contributors &copy; CARTO'
 
-    # 2. Light map — detailed roads and labels
+    # 2. Light map — detailed roads and labels.
+    # Use explicit, single-host raster URLs: avoiding {s} and {r} template
+    # placeholders prevents tile URL substitution problems in embedded
+    # Streamlit/Folium maps and works without an API key.
     folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        tiles="https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
         name="Light map — detailed",
         attr=carto_attribution,
-        subdomains="abcd",
         overlay=False,
         control=True,
         show=False,
-        max_zoom=20,
+        max_zoom=19,
+        max_native_zoom=19,
+        no_wrap=True,
     ).add_to(m)
 
-    # 3. Dark map — navigation-style roads and labels
+    # 3. Dark map — navigation-style roads and labels.
     folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        tiles="https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         name="Dark map — navigation",
         attr=carto_attribution,
-        subdomains="abcd",
         overlay=False,
         control=True,
         show=False,
-        max_zoom=20,
+        max_zoom=19,
+        max_native_zoom=19,
+        no_wrap=True,
     ).add_to(m)
 
     # Traffic layer: each segment is colored using the workbook's travel-time ratio.
@@ -617,7 +622,7 @@ shape_lookup = get_shape_lookup(shape)
 center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].mean())]
 traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
 st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
-st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Select exactly one base map; traffic congestion and route lines remain independent overlays. Light and Dark maps use key-free Esri ArcGIS tiles. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
+st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Select exactly one base map; traffic congestion and route lines remain independent overlays. Light and Dark maps use direct CARTO raster tiles and do not require an API key. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
 # Small, unobtrusive voice assistant panel below the map; auto-welcome is attempted
 # after the map renders, and Replay voice is available if browser autoplay is blocked.
 components.html(welcome_html, height=66, scrolling=False)
