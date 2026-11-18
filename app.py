@@ -311,143 +311,49 @@ for p in paths:
 best_idx=int(np.argmin([x['score'] for x in infos]))
 best=infos[best_idx]
 
-# Welcome panel: render it AFTER the map so the greeting starts only once the map
-# has appeared in the dashboard. Speech uses the device/browser English voice and
-# needs no paid API key. Some browsers block autoplay, so the visible button is fallback.
+# Silent welcome component: no visible voice box or controls are rendered.
+# After the map appears, attempt the same cinematic English browser voice.
+# Browser autoplay policies may still require prior user interaction with the page.
 welcome_html = r"""
 <!doctype html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .welcome { border-radius: 20px; padding: 19px 21px 15px; color: #fff; background: linear-gradient(120deg, #102849 0%, #154b78 56%, #167e93 100%); box-shadow: 0 10px 28px rgba(15, 45, 78, .17); overflow: hidden; }
-  .top { display: flex; align-items: center; gap: 13px; }
-  .logo { flex: 0 0 47px; width: 47px; height: 47px; display: grid; place-items: center; border-radius: 15px; background: rgba(255,255,255,.14); font-size: 25px; }
-  .eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .15em; color: #aeeaf2; margin-bottom: 4px; }
-  .title { font-size: clamp(18px, 2.5vw, 25px); line-height: 1.2; font-weight: 800; letter-spacing: -.03em; }
-  .sub { font-size: 12px; color: #d9eafa; margin-top: 5px; line-height: 1.45; }
-  .pill { margin-left: auto; flex-shrink: 0; padding: 7px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.10); font-size: 10px; letter-spacing: .08em; font-weight: 800; }
-  .track { height: 4px; margin-top: 17px; background: rgba(255,255,255,.19); border-radius: 99px; overflow: hidden; }
-  .bar { height: 100%; width: 32%; border-radius: 99px; background: #69e1d0; transition: width .7s ease; animation: progress 1.15s ease-in-out infinite alternate; }
-  .bottom { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-  .status { display: flex; align-items: center; gap: 7px; color: #dcebf8; font-size: 11px; flex: 1 1 220px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #69e1d0; box-shadow: 0 0 0 4px rgba(105,225,208,.15); }
-  .voice { cursor: pointer; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12); color: #fff; padding: 9px 12px; border-radius: 11px; font-size: 11px; font-weight: 750; }
-  .voice:hover { background: rgba(255,255,255,.22); }
-  .voice-style { max-width: 100%; cursor: pointer; border: 1px solid rgba(255,255,255,.3); background: #163e61; color: #fff; padding: 8px 9px; border-radius: 10px; font-size: 11px; }
-  .hint { font-size: 10px; color: #c6dced; width: 100%; }
-  @keyframes progress { from { transform: translateX(-10%); width: 28%; } to { transform: translateX(220%); width: 42%; } }
-  @media (max-width: 480px) { .welcome { padding: 15px 14px 13px; border-radius: 16px; } .logo { width: 40px; height: 40px; flex-basis: 40px; font-size: 22px; } .pill { padding: 6px 8px; font-size: 9px; } .bottom { gap: 9px; } }
-  @media (prefers-reduced-motion: reduce) { .bar { animation: none; } }
-</style>
-</head>
-<body>
-<section class="welcome" role="status" aria-live="polite">
-  <div class="top">
-    <div class="logo">🚦</div>
-    <div style="min-width:0">
-      <div class="eyebrow">BENGALURU SMART NAVIGATION</div>
-      <div class="title" id="welcome-title">Connecting to Bengaluru City Map…</div>
-      <div class="sub" id="welcome-sub">Preparing your route planner and traffic layers</div>
-    </div>
-    <div class="pill" id="ready-pill">CONNECTING</div>
-  </div>
-  <div class="track"><div class="bar" id="progress-bar"></div></div>
-  <div class="bottom">
-    <div class="status"><span class="dot"></span><span id="welcome-status">Initializing navigation view…</span></div>
-    <select class="voice-style" id="voice-style" aria-label="Choose voice style">
-      <option value="cinematic">Cinematic British AI (recommended)</option>
-      <option value="indian">Natural Indian English</option>
-      <option value="american">Clear American English</option>
-    </select>
-    <button class="voice" id="voice-button" type="button">🔊 Enable voice</button>
-    <div class="hint" id="voice-hint">Choose a voice style, then enable voice. Available voices depend on your device and browser.</div>
-  </div>
-</section>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;overflow:hidden;background:transparent">
 <script>
 (function () {
   const greeting = "Good day. Welcome to Bengaluru City Map. Navigation systems are online. Please select your starting point and destination. I will help you compare routes, estimated travel times, and congestion levels. Have a smooth and safe journey.";
-  const title = document.getElementById('welcome-title');
-  const subtitle = document.getElementById('welcome-sub');
-  const pill = document.getElementById('ready-pill');
-  const status = document.getElementById('welcome-status');
-  const bar = document.getElementById('progress-bar');
-  const voiceButton = document.getElementById('voice-button');
-  const voiceHint = document.getElementById('voice-hint');
-  const voiceStyle = document.getElementById('voice-style');
-  let speechAvailable = ('speechSynthesis' in window) && ('SpeechSynthesisUtterance' in window);
-
-  function setReady() {
-    title.textContent = 'Welcome to Bengaluru City Map';
-    subtitle.textContent = 'Your route planner is ready — choose your start and destination in the dashboard.';
-    pill.textContent = 'MAP READY';
-    status.textContent = 'Map and route options are ready below.';
-    bar.style.animation = 'none';
-    bar.style.width = '100%';
-  }
-
+  const key = 'bengaluru-map-welcome-attempted-v4';
   function speakWelcome() {
-    if (!speechAvailable) {
-      status.textContent = 'Voice playback is not supported in this browser. The map is ready.';
-      voiceHint.textContent = 'Try the dashboard in an up-to-date Chrome, Edge, or Safari browser.';
-      return;
-    }
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      if (typeof window.speechSynthesis.resume === 'function') window.speechSynthesis.resume();
       const utterance = new SpeechSynthesisUtterance(greeting);
       const voices = window.speechSynthesis.getVoices();
-      const style = voiceStyle.value;
-      let preferredLang = style === 'indian' ? /^en-IN$/i : (style === 'american' ? /^en-US$/i : /^en-GB$/i);
-      let voice = voices.find(v => preferredLang.test(v.lang));
-      if (!voice && style === 'cinematic') voice = voices.find(v => /^en/i.test(v.lang) && /female|natural|enhanced|premium/i.test(v.name));
+      let voice = voices.find(v => /^en-GB$/i.test(v.lang));
+      if (!voice) voice = voices.find(v => /^en/i.test(v.lang) && /natural|enhanced|premium/i.test(v.name));
       if (!voice) voice = voices.find(v => /^en/i.test(v.lang));
       if (voice) utterance.voice = voice;
-      utterance.lang = voice ? voice.lang : (style === 'indian' ? 'en-IN' : style === 'american' ? 'en-US' : 'en-GB');
-      // A composed, measured, low-pitch delivery evokes a polished cinematic AI assistant
-      // without copying any specific character or actor's voice.
-      utterance.rate = style === 'cinematic' ? 0.88 : 0.95;
-      utterance.pitch = style === 'cinematic' ? 0.78 : (style === 'indian' ? 0.96 : 0.92);
+      utterance.lang = voice ? voice.lang : 'en-GB';
+      utterance.rate = 0.88;
+      utterance.pitch = 0.78;
       utterance.volume = 1.0;
-      if (!voice) voiceHint.textContent = 'Using your browser default voice. Install or enable an English voice in device settings for more choices.';
-      else voiceHint.textContent = 'Voice selected: ' + voice.name + ' (' + voice.lang + ').';
-      utterance.onstart = () => { status.textContent = 'Playing cinematic navigation welcome…'; };
-      utterance.onend = () => { status.textContent = 'Welcome message finished. Have a safe journey!'; };
-      utterance.onerror = () => { status.textContent = 'Automatic audio was blocked. Tap Enable voice to start the welcome.'; voiceButton.textContent = '🔊 Enable voice'; voiceHint.textContent = 'Your browser may require a tap before it will play speech.'; };
       window.speechSynthesis.speak(utterance);
-    } catch (err) {
-      status.textContent = 'Tap “Enable welcome voice” to retry audio.';
-    }
+    } catch (e) { /* Keep dashboard usable if speech is unavailable. */ }
   }
-
-  voiceButton.addEventListener('click', function () {
-    speakWelcome();
-    voiceButton.textContent = '🔊 Replay voice';
-  });
-
-  // The component is placed after the map in the Streamlit page. Wait briefly so
-  // the map and route layers have time to become visible before starting the welcome.
-  window.setTimeout(function () {
-    setReady();
-    status.textContent = 'Map displayed. Preparing your English voice welcome…';
-    let alreadyAttempted = false;
-    try { alreadyAttempted = sessionStorage.getItem('bengaluru-map-welcome-attempted-v3') === 'yes'; } catch (e) {}
-    if (!alreadyAttempted) {
-      try { sessionStorage.setItem('bengaluru-map-welcome-attempted-v3', 'yes'); } catch (e) {}
-      window.setTimeout(function () {
-        speakWelcome(); // Best-effort autoplay; some browsers require a tap.
-      }, 2200);
-    } else {
-      status.textContent = 'Map is ready. Use Replay Voice to hear the welcome again.';
-      voiceButton.textContent = '🔊 Replay voice';
-    }
-  }, 500);
+  let attempted = false;
+  try { attempted = sessionStorage.getItem(key) === 'yes'; } catch (e) {}
+  if (!attempted) {
+    try { sessionStorage.setItem(key, 'yes'); } catch (e) {}
+    // Give Streamlit/Folium time to paint the interactive map before speaking.
+    window.setTimeout(function () {
+      if (window.speechSynthesis && window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = speakWelcome;
+        window.setTimeout(speakWelcome, 900);
+      } else { speakWelcome(); }
+    }, 2600);
+  }
 })();
 </script>
-</body>
-</html>
+</body></html>
 """
 
 # Put the interactive route map before the welcome panel. This way the voice component
@@ -458,7 +364,7 @@ center = [float(work['Start Latitude'].mean()), float(work['Start Longitude'].me
 traffic_map = route_map(paths, infos, shape_lookup, center, traffic_df=work)
 st_folium(traffic_map, use_container_width=True, height=620, returned_objects=[])
 st.caption('Use the top-right layer control to switch Street, Light, and Dark base maps. Traffic congestion and route lines stay visible above the selected base map. Traffic colors use the workbook travel-time ratio; they are not live traffic feeds.')
-components.html(welcome_html, height=194, scrolling=False)
+components.html(welcome_html, height=1, scrolling=False)
 
 # KPIs — use two rows of three cards so values and units remain readable on desktop and mobile.
 st.subheader('Optimal route')
@@ -496,6 +402,7 @@ for i,m in enumerate(infos,1):
 comp=pd.DataFrame(rows)
 st.subheader('Multiple route comparison')
 st.dataframe(comp,use_container_width=True,hide_index=True)
+st.caption('Travel-time ratio unit: × (times). This is a dimensionless multiplier comparing segment travel time with its reference/free-flow travel time; it is not measured in minutes. For example, 1.93× means approximately 1.93 times the reference travel time.')
 
 # Traffic details and analysis
 c1,c2=st.columns(2)
@@ -505,6 +412,7 @@ with c1:
         'Metric':['Congestion category','Travel-time ratio (×)','Severe segments','High segments','Moderate segments','Road sections'],
         'Value':[best['traffic'],f"{best['ratio']:.2f}×",best['severe'],best['high'],best['moderate'],len(route_edges(G,paths[best_idx]))]})
     st.table(detail)
+    st.caption('Travel-time ratio is displayed in × (times), not min. ETA and travel duration use minutes (min).')
 with c2:
     st.subheader('Congestion distribution')
     dist=work['Travel Time Ratio'].apply(traffic_label).value_counts().reindex(['Low','Moderate','High','Severe']).fillna(0)
@@ -523,6 +431,7 @@ street_summary=street_summary.rename(columns={'Avg_Travel_Time_Ratio':'Avg Trave
 street_summary_display=street_summary.round(2)
 street_summary_display['Avg Travel-time ratio (×)']=street_summary_display['Avg Travel-time ratio (×)'].map(lambda v: f"{v:.2f}×" if pd.notna(v) else '—')
 st.dataframe(street_summary_display,use_container_width=True,hide_index=True)
+st.caption('Street-level average travel-time ratio is expressed as × (times); distance is km and average speed is km/h.')
 
 st.subheader('Dataset parameters used by this dashboard')
 st.markdown('**Available in workbook:** latitude, longitude, time window, segment distance, speed, travel time, travel-time ratio, speed reduction, congestion category, street/segment information and route percentiles.')
